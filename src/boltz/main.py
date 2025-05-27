@@ -728,9 +728,14 @@ def predict(
     msa_module_args = MSAModuleArgs(use_trifast=(accelerator != "cpu"))
 
     steering_args = BoltzSteeringParams()
+
     if no_potentials:
         steering_args.fk_steering = False
         steering_args.guidance_update = False
+
+    sa = asdict(steering_args)
+    sa.setdefault("use_egf", False)
+    sa.setdefault("egf_lr", 0.01)
 
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
@@ -741,7 +746,7 @@ def predict(
         ema=False,
         pairformer_args=asdict(pairformer_args),
         msa_module_args=asdict(msa_module_args),
-        steering_args=asdict(steering_args),
+        steering_args=sa,
     )
     model_module.eval()
 

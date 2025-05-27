@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 import torch
 import torch._dynamo
+import torch.optim
 from pytorch_lightning import LightningModule
 from torch import Tensor, nn
 from torchmetrics import MeanMetric
@@ -321,6 +322,46 @@ class Boltz1(LightningModule):
 
             pdistogram = self.distogram_module(z)
             dict_out = {"pdistogram": pdistogram}
+            # --- EGF ステップ: 推論時かつ use_egf=True なら  ---
+            if (not self.training) and self.steering_args.get("use_egf", False):
+                # s, z を微分可能にコピー
+                s_egf = s.clone().detach().requires_grad_(True)
+                z_egf = z.clone().detach().requires_grad_(True)
+
+                # 1ステップ Adam でエントロピーを最大化
+                optimizer = torch.optim.Adam(
+                    [s_egf, z_egf],
+                    lr=self.steering_args["egf_lr"]
+                )
+                optimizer.zero_grad()
+                # distogram を再計算して確率分布取得
+                probs = torch.softmax(self.distogram_module(z_egf), dim=-1)
+                # エントロピー損失 (H = -∑ p log p) を定義
+                entropy_loss = - (probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
+                # 最大化: -entropy_loss を最小化
+                (-entropy_loss).backward()
+                optimizer.step()
+
+                # 更新後の z_egf で distogram & 構造サンプルを再取得
+                pdistogram_egf = self.distogram_module(z_egf)
+                dict_out["pdistogram_egf"] = pdistogram_egf
+
+                sm_out = self.structure_module.sample(
+                   s_trunk=s_egf,
+                   z_trunk=z_egf,
+                   s_inputs=s_inputs,
+                   feats=feats,
+                   relative_position_encoding=relative_position_encoding,
+                   num_sampling_steps=num_sampling_steps,
+                   atom_mask=feats["atom_pad_mask"],
+                   multiplicity=diffusion_samples,
+                   train_accumulate_token_repr=False,
+                   steering_args=self.steering_args,
+                )
+                # キーに `_egf` サフィックスを付与して出力に追加
+                for k, v in sm_out.items():
+                    dict_out[f"{k}_egf"] = v
+            # ------------------------------------------
 
         # Compute structure module
         if self.training and self.structure_prediction_training:
