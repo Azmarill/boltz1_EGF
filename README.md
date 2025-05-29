@@ -123,5 +123,3 @@ If you use this enhanced Boltz-1 model, please cite both the original Boltz-1 pa
 Submit issues or contribute improvements via pull requests.
 
 ---
-
-© 2024 Your Organization or Your Name
