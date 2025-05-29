@@ -96,7 +96,8 @@ class BoltzSteeringParams:
     fk_resampling_interval: int = 3
     guidance_update: bool = True
     num_gd_steps: int = 16
-
+    use_egf: bool = False
+    egf_lr: float = 0.01
 
 @rank_zero_only
 def download(cache: Path) -> None:
@@ -604,6 +605,17 @@ def cli() -> None:
     is_flag=True,
     help="Whether to not use potentials for steering. Default is False.",
 )
+@click.option(
+    "--use_egf",
+    is_flag=True,
+    help="Whether to use entropy-guided fine-tuning (EGF). Default is False.",
+)
+@click.option(
+    "--egf_lr",
+    type=float,
+    default=0.01,
+    help="Learning rate for EGF optimization. Default is 0.01.",
+)
 def predict(
     data: str,
     out_dir: str,
@@ -727,11 +739,12 @@ def predict(
     pairformer_args = PairformerArgs(use_trifast=(accelerator != "cpu"))
     msa_module_args = MSAModuleArgs(use_trifast=(accelerator != "cpu"))
 
-    steering_args = BoltzSteeringParams()
-
-    if no_potentials:
-        steering_args.fk_steering = False
-        steering_args.guidance_update = False
+    steering_args = BoltzSteeringParams(
+        fk_steering=not no_potentials,
+        guidance_update=not no_potentials,
+        use_egf=use_egf,
+        egf_lr=egf_lr
+    )
 
     sa = asdict(steering_args)
     sa.setdefault("use_egf", False)

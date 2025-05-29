@@ -81,6 +81,7 @@ class Boltz1(LightningModule):
         super().__init__()
 
         self.save_hyperparameters()
+        self.steering_args = steering_args
 
         self.lddt = nn.ModuleDict()
         self.disto_lddt = nn.ModuleDict()
@@ -322,27 +323,22 @@ class Boltz1(LightningModule):
 
             pdistogram = self.distogram_module(z)
             dict_out = {"pdistogram": pdistogram}
-            # --- EGF ステップ: 推論時かつ use_egf=True なら  ---
+ #250529-Oheda-EGF-Imprementation-----------------------------------------------------
             if (not self.training) and self.steering_args.get("use_egf", False):
-                # s, z を微分可能にコピー
-                s_egf = s.clone().detach().requires_grad_(True)
-                z_egf = z.clone().detach().requires_grad_(True)
+                with torch.no_grad():
+                    s_egf = s.clone().detach().requires_grad_(True)
+                    z_egf = z.clone().detach().requires_grad_(True)
 
-                # 1ステップ Adam でエントロピーを最大化
                 optimizer = torch.optim.Adam(
                     [s_egf, z_egf],
                     lr=self.steering_args["egf_lr"]
                 )
                 optimizer.zero_grad()
-                # distogram を再計算して確率分布取得
                 probs = torch.softmax(self.distogram_module(z_egf), dim=-1)
-                # エントロピー損失 (H = -∑ p log p) を定義
                 entropy_loss = - (probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
-                # 最大化: -entropy_loss を最小化
                 (-entropy_loss).backward()
                 optimizer.step()
 
-                # 更新後の z_egf で distogram & 構造サンプルを再取得
                 pdistogram_egf = self.distogram_module(z_egf)
                 dict_out["pdistogram_egf"] = pdistogram_egf
 
@@ -358,10 +354,9 @@ class Boltz1(LightningModule):
                    train_accumulate_token_repr=False,
                    steering_args=self.steering_args,
                 )
-                # キーに `_egf` サフィックスを付与して出力に追加
                 for k, v in sm_out.items():
                     dict_out[f"{k}_egf"] = v
-            # ------------------------------------------
+ #--------------------------------------------------------------------------------------
 
         # Compute structure module
         if self.training and self.structure_prediction_training:
