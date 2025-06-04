@@ -327,21 +327,12 @@ class Boltz1(LightningModule):
 
             pdistogram = self.distogram_module(z)
             dict_out = {"pdistogram": pdistogram}
-            print("DistogramModule parameters requires_grad states:")
-            for name,  param in self.distogram_module.named_parameters():
-                print(f"{name}: requires_grad = {param.requires_grad}")
+            for _, param in self.distogram_module.named_parameters():
                 param.requires_grad = True
- #250529-Oheda-EGF-Imprementation-----------------------------------------------------
-            if (not self.training) and self.steering_args.get("use_egf", False):
-                with torch.enable_grad():
-                    print("=== DEBUG EGF ===")
-                    print("Initial s.requires_grad:", s.requires_grad)
-                    print("Initial z.requires_grad:", z.requires_grad)
+            if self.steering_args.get("use_egf", False):
 
                     s_egf = s.clone().detach().requires_grad_(True)
                     z_egf = z.clone().detach().requires_grad_(True)
-                    print("s_egf.requires_grad (after clone):", s_egf.requires_grad)
-                    print("z_egf.requires_grad (after clone):", z_egf.requires_grad)
 
                     optimizer = torch.optim.Adam(
                         [s_egf, z_egf],
@@ -350,13 +341,10 @@ class Boltz1(LightningModule):
                     optimizer.zero_grad()
 
                     output = self.distogram_module(z_egf)
-                    print("distogram output.requires_grad:", output.requires_grad)
 
                     probs = torch.softmax(output, dim=-1)
-                    print("probs.requires_grad:", probs.requires_grad)
 
                     entropy_loss = - (probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
-                    print("entropy_loss.requires_grad:", entropy_loss.requires_grad)
 
                     (-entropy_loss).backward()
                     optimizer.step()
@@ -378,7 +366,6 @@ class Boltz1(LightningModule):
                     )
                     for k, v in sm_out.items():
                         dict_out[f"{k}_egf"] = v
- #--------------------------------------------------------------------------------------
 
         # Compute structure module
         if self.training and self.structure_prediction_training:
@@ -1184,11 +1171,6 @@ class Boltz1(LightningModule):
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         self.train()
-        print("Model is in training mode:", self.training)
-        print("DistogramModule is in training mode:", self.distogram_module.training)
-        print("PairformerModule is in training mode:", self.pairformer_module.training)
-        if hasattr(self, 'msa_module') and self.msa_module is not None:
-            print("MSAModule is in training mode:", self.msa_module.training)
 
         with torch.enable_grad():
             try:
