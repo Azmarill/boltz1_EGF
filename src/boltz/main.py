@@ -637,6 +637,8 @@ def predict(
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
     no_potentials: bool = False,
+    use_egf: bool = False,
+    egf_lr: float = 0.01
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
@@ -738,6 +740,7 @@ def predict(
 
     pairformer_args = PairformerArgs(use_trifast=(accelerator != "cpu"))
     msa_module_args = MSAModuleArgs(use_trifast=(accelerator != "cpu"))
+    use_checkpoint=False
 
     steering_args = BoltzSteeringParams(
         fk_steering=not no_potentials,
@@ -760,7 +763,11 @@ def predict(
         pairformer_args=asdict(pairformer_args),
         msa_module_args=asdict(msa_module_args),
         steering_args=sa,
+        structure_prediction_training=True
     )
+    for param in model_module.distogram_module.parameters():
+        param.requires_grad = True
+
     model_module.eval()
 
     # Create prediction writer

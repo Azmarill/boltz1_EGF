@@ -311,7 +311,11 @@ class Boltz1(LightningModule):
 
                     # Compute pairwise stack
                     if not self.no_msa:
-                        z = z + self.msa_module(z, s_inputs, feats)
+                        z = z + self.msa_module(
+                            z.clone().detach().requires_grad_(True),
+                            s_inputs.clone().detach().requires_grad_(True),
+                            feats
+                        )
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:
@@ -323,39 +327,57 @@ class Boltz1(LightningModule):
 
             pdistogram = self.distogram_module(z)
             dict_out = {"pdistogram": pdistogram}
+            print("DistogramModule parameters requires_grad states:")
+            for name,  param in self.distogram_module.named_parameters():
+                print(f"{name}: requires_grad = {param.requires_grad}")
+                param.requires_grad = True
  #250529-Oheda-EGF-Imprementation-----------------------------------------------------
             if (not self.training) and self.steering_args.get("use_egf", False):
-                with torch.no_grad():
+                with torch.enable_grad():
+                    print("=== DEBUG EGF ===")
+                    print("Initial s.requires_grad:", s.requires_grad)
+                    print("Initial z.requires_grad:", z.requires_grad)
+
                     s_egf = s.clone().detach().requires_grad_(True)
                     z_egf = z.clone().detach().requires_grad_(True)
+                    print("s_egf.requires_grad (after clone):", s_egf.requires_grad)
+                    print("z_egf.requires_grad (after clone):", z_egf.requires_grad)
 
-                optimizer = torch.optim.Adam(
-                    [s_egf, z_egf],
-                    lr=self.steering_args["egf_lr"]
-                )
-                optimizer.zero_grad()
-                probs = torch.softmax(self.distogram_module(z_egf), dim=-1)
-                entropy_loss = - (probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
-                (-entropy_loss).backward()
-                optimizer.step()
+                    optimizer = torch.optim.Adam(
+                        [s_egf, z_egf],
+                        lr=self.steering_args["egf_lr"]
+                    )
+                    optimizer.zero_grad()
 
-                pdistogram_egf = self.distogram_module(z_egf)
-                dict_out["pdistogram_egf"] = pdistogram_egf
+                    output = self.distogram_module(z_egf)
+                    print("distogram output.requires_grad:", output.requires_grad)
 
-                sm_out = self.structure_module.sample(
-                   s_trunk=s_egf,
-                   z_trunk=z_egf,
-                   s_inputs=s_inputs,
-                   feats=feats,
-                   relative_position_encoding=relative_position_encoding,
-                   num_sampling_steps=num_sampling_steps,
-                   atom_mask=feats["atom_pad_mask"],
-                   multiplicity=diffusion_samples,
-                   train_accumulate_token_repr=False,
-                   steering_args=self.steering_args,
-                )
-                for k, v in sm_out.items():
-                    dict_out[f"{k}_egf"] = v
+                    probs = torch.softmax(output, dim=-1)
+                    print("probs.requires_grad:", probs.requires_grad)
+
+                    entropy_loss = - (probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
+                    print("entropy_loss.requires_grad:", entropy_loss.requires_grad)
+
+                    (-entropy_loss).backward()
+                    optimizer.step()
+
+                    pdistogram_egf = self.distogram_module(z_egf)
+                    dict_out["pdistogram_egf"] = pdistogram_egf
+
+                    sm_out = self.structure_module.sample(
+                       s_trunk=s_egf,
+                       z_trunk=z_egf,
+                       s_inputs=s_inputs,
+                       feats=feats,
+                       relative_position_encoding=relative_position_encoding,
+                       num_sampling_steps=num_sampling_steps,
+                       atom_mask=feats["atom_pad_mask"],
+                       multiplicity=diffusion_samples,
+                       train_accumulate_token_repr=False,
+                       steering_args=self.steering_args,
+                    )
+                    for k, v in sm_out.items():
+                        dict_out[f"{k}_egf"] = v
  #--------------------------------------------------------------------------------------
 
         # Compute structure module
@@ -1161,55 +1183,63 @@ class Boltz1(LightningModule):
         self.best_rmsd.reset()
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        try:
-            out = self(
-                batch,
-                recycling_steps=self.predict_args["recycling_steps"],
-                num_sampling_steps=self.predict_args["sampling_steps"],
-                diffusion_samples=self.predict_args["diffusion_samples"],
-                run_confidence_sequentially=True,
-            )
-            pred_dict = {"exception": False}
-            pred_dict["masks"] = batch["atom_pad_mask"]
-            pred_dict["coords"] = out["sample_atom_coords"]
-            if self.predict_args.get("write_confidence_summary", True):
-                pred_dict["confidence_score"] = (
-                    4 * out["complex_plddt"]
-                    + (
-                        out["iptm"]
-                        if not torch.allclose(
-                            out["iptm"], torch.zeros_like(out["iptm"])
-                        )
-                        else out["ptm"]
-                    )
-                ) / 5
-                for key in [
-                    "ptm",
-                    "iptm",
-                    "ligand_iptm",
-                    "protein_iptm",
-                    "pair_chains_iptm",
-                    "complex_plddt",
-                    "complex_iplddt",
-                    "complex_pde",
-                    "complex_ipde",
-                    "plddt",
-                ]:
-                    pred_dict[key] = out[key]
-            if self.predict_args.get("write_full_pae", True):
-                pred_dict["pae"] = out["pae"]
-            if self.predict_args.get("write_full_pde", False):
-                pred_dict["pde"] = out["pde"]
-            return pred_dict
+        self.train()
+        print("Model is in training mode:", self.training)
+        print("DistogramModule is in training mode:", self.distogram_module.training)
+        print("PairformerModule is in training mode:", self.pairformer_module.training)
+        if hasattr(self, 'msa_module') and self.msa_module is not None:
+            print("MSAModule is in training mode:", self.msa_module.training)
 
-        except RuntimeError as e:  # catch out of memory exceptions
-            if "out of memory" in str(e):
-                print("| WARNING: ran out of memory, skipping batch")
-                torch.cuda.empty_cache()
-                gc.collect()
-                return {"exception": True}
-            else:
-                raise
+        with torch.enable_grad():
+            try:
+                out = self(
+                    batch,
+                    recycling_steps=self.predict_args["recycling_steps"],
+                    num_sampling_steps=self.predict_args["sampling_steps"],
+                    diffusion_samples=self.predict_args["diffusion_samples"],
+                    run_confidence_sequentially=True,
+                )
+                pred_dict = {"exception": False}
+                pred_dict["masks"] = batch["atom_pad_mask"]
+                pred_dict["coords"] = out["sample_atom_coords"]
+                if self.predict_args.get("write_confidence_summary", True):
+                    pred_dict["confidence_score"] = (
+                        4 * out["complex_plddt"]
+                        + (
+                            out["iptm"]
+                            if not torch.allclose(
+                                out["iptm"], torch.zeros_like(out["iptm"])
+                            )
+                            else out["ptm"]
+                        )
+                    ) / 5
+                    for key in [
+                        "ptm",
+                        "iptm",
+                        "ligand_iptm",
+                        "protein_iptm",
+                        "pair_chains_iptm",
+                        "complex_plddt",
+                        "complex_iplddt",
+                        "complex_pde",
+                        "complex_ipde",
+                        "plddt",
+                    ]:
+                        pred_dict[key] = out[key]
+                if self.predict_args.get("write_full_pae", True):
+                    pred_dict["pae"] = out["pae"]
+                if self.predict_args.get("write_full_pde", False):
+                    pred_dict["pde"] = out["pde"]
+                return pred_dict
+
+            except RuntimeError as e:  # catch out of memory exceptions
+                if "out of memory" in str(e):
+                    print("| WARNING: ran out of memory, skipping batch")
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    return {"exception": True}
+                else:
+                    raise
 
     def configure_optimizers(self):
         """Configure the optimizer."""

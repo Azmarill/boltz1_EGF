@@ -121,7 +121,8 @@ class DiffusionTransformer(Module):
 
         """
         super().__init__()
-        self.activation_checkpointing = activation_checkpointing
+        self.activation_checkpointing = False
+        # self.activation_checkpointing = activation_checkpointing
         dim_single_cond = default(dim_single_cond, dim)
 
         self.layers = ModuleList()

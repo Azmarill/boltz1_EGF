@@ -223,6 +223,69 @@ class BoltzWriter(BasePredictionWriter):
                     )
                     np.savez_compressed(path, pde=pde.cpu().numpy())
 
+                # Save EGF structure
+                # EGF予測結果の保存処理を追加
+            if "coords_egf" in prediction:
+                coords_egf = prediction["coords_egf"].unsqueeze(0)
+                pad_masks_egf = prediction["masks_egf"] if "masks_egf" in prediction else pad_masks
+
+                for model_idx in range(coords_egf.shape[1]):
+                    # EGFモデルの座標を取得
+                    model_coord_egf = coords_egf[0, model_idx]
+                        # Unpad
+                    coord_unpad_egf = model_coord_egf[pad_masks_egf.bool()]
+                    coord_unpad_egf = coord_unpad_egf.cpu().numpy()
+
+                        # atom table更新（EGF）
+                    atoms_egf = structure.atoms
+                    atoms_egf["coords"] = coord_unpad_egf
+                    atoms_egf["is_present"] = True
+
+                        # residue table更新（EGF）
+                    residues_egf = structure.residues
+                    residues_egf["is_present"] = True
+
+                        # 構造情報を更新（EGF用）
+                    new_structure_egf: Structure = replace(
+                        structure,
+                        atoms=atoms_egf,
+                        residues=residues_egf,
+                        interfaces=interfaces,
+                   )
+
+                        # 構造を保存するディレクトリ指定（EGF）
+                    struct_dir_egf = self.output_dir / record.id
+                    struct_dir_egf.mkdir(exist_ok=True)
+
+                        # plddt (EGF用) の取得（存在する場合）
+                    plddts_egf = None
+                    if "plddt_egf" in prediction:
+                        plddts_egf = prediction["plddt_egf"][model_idx]
+
+                        # EGF構造のファイル名生成
+                    outname_egf = f"{record.id}_egf_model_{idx_to_rank[model_idx]}"
+
+                        # EGF構造を保存
+                    if self.output_format == "pdb":
+                        path_egf = struct_dir_egf / f"{outname_egf}.pdb"
+                        with path_egf.open("w") as f:
+                            f.write(to_pdb(new_structure_egf, plddts=plddts_egf))
+                    elif self.output_format == "mmcif":
+                        path_egf = struct_dir_egf / f"{outname_egf}.cif"
+                        with path_egf.open("w") as f:
+                            f.write(to_mmcif(new_structure_egf, plddts=plddts_egf))
+                    else:
+                        path_egf = struct_dir_egf / f"{outname_egf}.npz"
+                        np.savez_compressed(path_egf, **asdict(new_structure_egf))
+
+                       # EGF用のconfidenceやplddtも同様に保存
+                    if "plddt_egf" in prediction:
+                        path_egf_plddt = (
+                            struct_dir_egf
+                            / f"plddt_{record.id}_egf_model_{idx_to_rank[model_idx]}.npz"
+                        )
+                        np.savez_compressed(path_egf_plddt, plddt=plddts_egf.cpu().numpy())
+
     def on_predict_epoch_end(
         self,
         trainer: Trainer,  # noqa: ARG002
