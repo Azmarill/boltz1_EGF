@@ -330,7 +330,9 @@ class Boltz1(LightningModule):
             for _, param in self.distogram_module.named_parameters():
                 param.requires_grad = True
             if self.steering_args.get("use_egf", False):
-
+                # Enable gradient computation for EGF optimisation even when
+                # the outer context disables it during inference.
+                with torch.set_grad_enabled(True):
                     s_egf = s.clone().detach().requires_grad_(True)
                     z_egf = z.clone().detach().requires_grad_(True)
 
@@ -344,7 +346,9 @@ class Boltz1(LightningModule):
 
                     probs = torch.softmax(output, dim=-1)
 
-                    entropy_loss = - (probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
+                    entropy_loss = -(
+                        probs * torch.log(probs + 1e-8)
+                    ).sum(dim=-1).mean()
 
                     (-entropy_loss).backward()
                     optimizer.step()
@@ -353,16 +357,16 @@ class Boltz1(LightningModule):
                     dict_out["pdistogram_egf"] = pdistogram_egf
 
                     sm_out = self.structure_module.sample(
-                       s_trunk=s_egf,
-                       z_trunk=z_egf,
-                       s_inputs=s_inputs,
-                       feats=feats,
-                       relative_position_encoding=relative_position_encoding,
-                       num_sampling_steps=num_sampling_steps,
-                       atom_mask=feats["atom_pad_mask"],
-                       multiplicity=diffusion_samples,
-                       train_accumulate_token_repr=False,
-                       steering_args=self.steering_args,
+                        s_trunk=s_egf,
+                        z_trunk=z_egf,
+                        s_inputs=s_inputs,
+                        feats=feats,
+                        relative_position_encoding=relative_position_encoding,
+                        num_sampling_steps=num_sampling_steps,
+                        atom_mask=feats["atom_pad_mask"],
+                        multiplicity=diffusion_samples,
+                        train_accumulate_token_repr=False,
+                        steering_args=self.steering_args,
                     )
                     for k, v in sm_out.items():
                         dict_out[f"{k}_egf"] = v
