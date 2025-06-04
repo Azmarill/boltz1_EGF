@@ -738,6 +738,8 @@ def predict(
     }
     diffusion_params = BoltzDiffusionParams()
     diffusion_params.step_scale = step_scale
+    if use_egf:
+        diffusion_params.use_inference_model_cache = False
 
     pairformer_args = PairformerArgs(use_trifast=(accelerator != "cpu"))
     msa_module_args = MSAModuleArgs(use_trifast=(accelerator != "cpu"))
