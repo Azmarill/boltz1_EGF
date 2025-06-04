@@ -4,6 +4,7 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, Optional
+import inspect
 
 import click
 import torch
@@ -787,11 +788,20 @@ def predict(
     )
 
     # Compute predictions
-    trainer.predict(
-        model_module,
-        datamodule=data_module,
-        return_predictions=False,
-    )
+    signature = inspect.signature(trainer.predict)
+    if "inference_mode" in signature.parameters:
+        trainer.predict(
+            model_module,
+            datamodule=data_module,
+            return_predictions=False,
+            inference_mode=False,  # allow gradients for checkpointed layers
+        )
+    else:  # pragma: no cover - compatibility with older Lightning versions
+        trainer.predict(
+            model_module,
+            datamodule=data_module,
+            return_predictions=False,
+        )
 
 
 if __name__ == "__main__":
