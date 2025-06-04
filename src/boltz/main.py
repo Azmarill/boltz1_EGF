@@ -791,6 +791,7 @@ def predict(
         model_module,
         datamodule=data_module,
         return_predictions=False,
+        inference_mode=False,
     )
 
 
