@@ -126,8 +126,9 @@ class DiffusionTransformer(Module):
         dim_single_cond = default(dim_single_cond, dim)
 
         self.layers = ModuleList()
+        use_ckpt = activation_checkpointing and torch.is_grad_enabled() and not getattr(torch, "is_inference_mode_enabled", lambda: False)()
         for _ in range(depth):
-            if activation_checkpointing:
+            if use_ckpt:
                 self.layers.append(
                     checkpoint_wrapper(
                         DiffusionTransformerLayer(

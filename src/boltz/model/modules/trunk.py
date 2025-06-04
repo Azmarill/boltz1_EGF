@@ -173,8 +173,9 @@ class MSAModule(nn.Module):
             bias=False,
         )
         self.layers = nn.ModuleList()
+        use_ckpt = activation_checkpointing and torch.is_grad_enabled() and not getattr(torch, "is_inference_mode_enabled", lambda: False)()
         for i in range(msa_blocks):
-            if activation_checkpointing:
+            if use_ckpt:
                 self.layers.append(
                     checkpoint_wrapper(
                         MSALayer(
@@ -468,8 +469,9 @@ class PairformerModule(nn.Module):
         self.num_heads = num_heads
 
         self.layers = nn.ModuleList()
+        use_ckpt = activation_checkpointing and torch.is_grad_enabled() and not getattr(torch, "is_inference_mode_enabled", lambda: False)()
         for i in range(num_blocks):
-            if activation_checkpointing:
+            if use_ckpt:
                 self.layers.append(
                     checkpoint_wrapper(
                         PairformerLayer(
