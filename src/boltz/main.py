@@ -792,12 +792,19 @@ def predict(
     # Compute predictions
     signature = inspect.signature(trainer.predict)
     if "inference_mode" in signature.parameters:
-        trainer.predict(
-            model_module,
-            datamodule=data_module,
-            return_predictions=False,
-            inference_mode=False,  # allow gradients for checkpointed layers
-        )
+        try:
+            trainer.predict(
+                model_module,
+                datamodule=data_module,
+                return_predictions=False,
+                inference_mode=False,  # allow gradients for checkpointed layers
+            )
+        except TypeError:
+            trainer.predict(
+                model_module,
+                datamodule=data_module,
+                return_predictions=False,
+            )
     else:  # pragma: no cover - compatibility with older Lightning versions
         trainer.predict(
             model_module,
