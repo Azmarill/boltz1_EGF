@@ -1,6 +1,7 @@
 import gc
 import random
 from typing import Any, Optional
+import contextlib
 
 import torch
 import torch._dynamo
@@ -338,36 +339,42 @@ class Boltz1(LightningModule):
 
                     optimizer = torch.optim.Adam(
                         [s_egf, z_egf],
-                        lr=self.steering_args["egf_lr"]
+                        lr=self.steering_args["egf_lr"],
                     )
                     optimizer.zero_grad()
 
-                    output = self.distogram_module(z_egf)
-
-                    probs = torch.softmax(output, dim=-1)
-
-                    entropy_loss = -(
-                        probs * torch.log(probs + 1e-8)
-                    ).sum(dim=-1).mean()
+                    autocast_device = s_egf.device.type
+                    amp_ctx = (
+                        torch.autocast(device_type=autocast_device)
+                        if autocast_device == "cuda"
+                        else contextlib.nullcontext()
+                    )
+                    with amp_ctx:
+                        output = self.distogram_module(z_egf)
+                        probs = torch.softmax(output, dim=-1)
+                        entropy_loss = -(
+                            probs * torch.log(probs + 1e-8)
+                        ).sum(dim=-1).mean()
 
                     (-entropy_loss).backward()
                     optimizer.step()
 
-                    pdistogram_egf = self.distogram_module(z_egf)
-                    dict_out["pdistogram_egf"] = pdistogram_egf
+                    with amp_ctx:
+                        pdistogram_egf = self.distogram_module(z_egf)
+                        dict_out["pdistogram_egf"] = pdistogram_egf
 
-                    sm_out = self.structure_module.sample(
-                        s_trunk=s_egf,
-                        z_trunk=z_egf,
-                        s_inputs=s_inputs,
-                        feats=feats,
-                        relative_position_encoding=relative_position_encoding,
-                        num_sampling_steps=num_sampling_steps,
-                        atom_mask=feats["atom_pad_mask"],
-                        multiplicity=diffusion_samples,
-                        train_accumulate_token_repr=False,
-                        steering_args=self.steering_args,
-                    )
+                        sm_out = self.structure_module.sample(
+                            s_trunk=s_egf,
+                            z_trunk=z_egf,
+                            s_inputs=s_inputs,
+                            feats=feats,
+                            relative_position_encoding=relative_position_encoding,
+                            num_sampling_steps=num_sampling_steps,
+                            atom_mask=feats["atom_pad_mask"],
+                            multiplicity=diffusion_samples,
+                            train_accumulate_token_repr=False,
+                            steering_args=self.steering_args,
+                        )
                     for k, v in sm_out.items():
                         dict_out[f"{k}_egf"] = v
 
